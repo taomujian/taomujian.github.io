@@ -78,7 +78,7 @@ ga_domain:
 
 # Sidebar settings
 sidebar: true                           # whether or not using Sidebar.
-sidebar-about-description: "For the next quantum leap<br>到死之前,我们都是需要发育的孩子"
+sidebar-about-description: "Before we die, we are all children who need development<br>到死之前,我们都是需要发育的孩子"
 sidebar-avatar: /img/avatar-taomujian-ny.jpg      # use absolute URL, seeing it's used in both `/` and `/about/`
 
 
