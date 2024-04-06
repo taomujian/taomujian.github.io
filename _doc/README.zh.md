@@ -1,4 +1,4 @@
-# Taomujian Blog 模板
+# Hux blog 模板
 
 ### [我的博客在这里 &rarr;](http://taomujian.github.io)
 
@@ -21,13 +21,13 @@
 
 ## 关于模板(beta)
 
-我的博客仓库——`taomujian.github.io`，是经常修改的，而且还会有人乱提交代码，因此给大家做了一个稳定版的模板。大家可以直接fork模板——`taomujianblog-boilerplate`,要改的地方我都说明了。或者可以直接下载zip到本地自己去修改。
+我的博客仓库——`taomujian.github.io`，是经常修改的，而且还会有人乱提交代码，因此给大家做了一个稳定版的模板。大家可以直接fork模板——`huxblog-boilerplate`,要改的地方我都说明了。或者可以直接下载zip到本地自己去修改。
 
 ```
-$ git clone git@github.com:taomujian/taomujianblog-boilerplate.git
+$ git clone git@github.com:Huxpro/huxblog-boilerplate.git
 ```
 
-**[在这里预览模板 &rarr;]()**
+**[在这里预览模板 &rarr;](http://huangxuan.me/huxblog-boilerplate/)**
 
 ## 各版本特性
 
@@ -35,7 +35,7 @@ $ git clone git@github.com:taomujian/taomujianblog-boilerplate.git
 
 * 当你fork了我的仓库之后，还要删掉里面的关于我的文档是不是感到略烦躁呢？**Boilerplate** 模板将帮助你快速开始，方便合并与更新。
 * `-apple-system`被添加到了字体规则里面了，这套字体格式能将iOS9默认的新字体**San Francisco**表现的非常漂亮。
-* 解决了代码过长自动换行的bug,替换为横向滚动条。详情请见[issue#15](https://github.com/taomujian/taomujian.github.io/issues/15)
+* 解决了代码过长自动换行的bug,替换为横向滚动条。详情请见[issue#15](https://github.com/Huxpro/taomujian.github.io/issues/15)
 
 ###### 其他历史版本个人觉得没有必要了解，看看英文就行了。
 
@@ -79,12 +79,12 @@ $ git clone git@github.com:taomujian/taomujianblog-boilerplate.git
 
 ```
 # Site settings
-title: Taomujian Blog             # 你的博客网站标题
-SEOTitle: Taomujian Blog			# 在后面会详细谈到
+title: Hux Blog             # 你的博客网站标题
+SEOTitle: Hux Blog			# 在后面会详细谈到
 description: "Cool Blog"    # 随便说点，描述一下
 
 # SNS settings      
-github_username:      # 你的github账号
+github_username: taomujian     # 你的github账号
 weibo_username:       # 你的微博账号，底部链接会自动更新的。
 
 # Build settings
@@ -105,7 +105,7 @@ layout:     post
 title:      "Hello 2015"
 subtitle:   "Hello World, Hello Blog"
 date:       2015-01-29 12:00:00
-author:     "taomujian"
+author:     "Hux"
 header-img: "img/post-bg-2015.jpg"
 tags:
     - Life
@@ -243,7 +243,7 @@ JavaScript 的压缩混淆、Less 的编译、Apache 2.0 许可通告的添加�
 #### Header Image
 
 标题底图是可以自己选的，看看几篇示例post你就知道如何设置了。在
-  [issue #6 ](https://github.com/taomujian/taomujian.github.io/issues/6) 中我被问到：怎么样才能让标题底图好看呢？
+  [issue #6 ](https://github.com/Huxpro/taomujian.github.io/issues/6) 中我被问到：怎么样才能让标题底图好看呢？
   
 标题底图的选取完全是看个人的审美了，我也帮不了你。每一篇文章可以有不同的底图，你想放什么就放什么，最后宽度要够，大小不要太大，否则加载慢啊。
 
@@ -251,7 +251,7 @@ JavaScript 的压缩混淆、Less 的编译、Apache 2.0 许可通告的添加�
 
 #### SEO Title
 
-我的博客标题是 **“Taomujian Blog”** 但是我想要在搜索的时候显示 **“taomujian的博客 | Taomujian Blog”** ，这个就需要SEO Title来定义了。
+我的博客标题是 **“Hux Blog”** 但是我想要在搜索的时候显示 **“黄玄的博客 | Hux Blog”** ，这个就需要SEO Title来定义了。
 
 其实这个SEO Title就是定义了<head><title>标题</title></head>这个里面的东西和多说分享的标题，你可以自行修改的。
 
