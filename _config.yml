@@ -15,9 +15,9 @@ future: true
 RSS: false
 weibo_username:     
 zhihu_username:     
-github_username:    taomujian
+github_username:  taomujian
 twitter_username:   
-#facebook_username:  huxpro
+#facebook_username: 
 #linkedin_username:  firstname-lastname-idxxxx
 
 
@@ -27,7 +27,15 @@ twitter_username:
 highlighter: rouge
 permalink: pretty
 paginate: 10
-exclude: ["less","node_modules","Gruntfile.js","package.json","README.md","README.zh.md"]
+exclude: 
+  [
+    "less",
+    "node_modules",
+    "Gruntfile.js",
+    "package.json",
+    "README.md",
+    "README.zh.md"
+  ]
 anchorjs: true                          # if you want to customize anchor. check out line:181 of `post.html`
 # If you have timezone issue (e.g. #68) in China, uncomment to use this:
 #timezone: CN  
