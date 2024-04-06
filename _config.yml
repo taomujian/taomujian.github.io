@@ -6,7 +6,7 @@ email: taomujian@protonmail.com
 description: "关于程序设计、安全论道、哲学艺术 | taomujian, Software Engineer | 这里是 @Taomujian桃木剑 的个人博客,与你一起发现生活的美好."
 keyword: "taomujian, 桃木剑, 桃木剑的博客,个人网站, 互联网, Web, Security, Python"
 url: ""              # your host, for absolute URL
-baseurl: "https://taomujian.github.io/archive/"                             # for example, '/blog' if your blog hosted on 'host/blog'
+baseurl: ""                             # for example, '/blog' if your blog hosted on 'host/blog'
 
 # Publish posts or collection documents with a future date.
 future: true
