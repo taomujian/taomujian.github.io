@@ -1,0 +1,360 @@
+---
+layout: post
+title: "Sliver框架代码学习(一)"
+subtitle: 'Sliver框架代码学习(一)'
+author: "taomujian"
+header-style: text
+tags:
+  - Go
+  - C2
+  - Sliver
+---
+
+## 简述
+
+从整个结构上来说,sliver整个框架主要由四部分构成: 
+
+```
+服务端控制台: 服务端控制台是服务端的主界面,通过sliver-server文件启动,服务端控制台输入的命令通过RPC接口传递给服务端去完成各种任务.
+
+服务端: 接收服务端传来的各种指令去执行不同的任务,也是通过sliver-server文件启动,进行管理启动和停止监听器、数据库、生成证书、监听会话等一系列操作.
+
+客户端控制台: 客户端控制台是用于与服务端交互的主要用户界面,用来输入各种指令根据不同的协议分别与木马、服务端进行通信.
+
+植入物: 是生成恶意文件(木马)所依赖的主要部分,是Sliver的核心部分.
+
+Sliver设计的Implants具备两种模式: beacon模式和session模式,区别在于beacon模式属于异步通信方式,即木马执行累计的任务后,定期连接服务端并返回数据,该模式与CobaltStrike的通信方式相同,而session模式则进行持久连接,前者通信更加隐蔽,后者执行命令响应速度更快.当前Implants可由beacon模式切换至session模式,反之的功能官方尚未实现.
+```
+
+本篇文章通过在本地执行Sliver(版本为v1.5.42),结合代码及所在文件来分析下Sliver启动服务端控制台、建立监听器、生成木马的流程.
+
+## 启动服务端控制台
+
+首先把vendor/github.com/reeflective/console/run.go文件的第22行到第24行注释掉,不打印logo信息,不注释的话直接运行源代码会失败.
+
+主要启动流程: 
+
+首先是server/main.go第28行: cli.Execute()
+
+然后来到server/cli/cli.go第159行rootCmd.Execute()函数,开始根据输入的命令行参数进行解析命令,开始整个程序的启动
+
+解析命令参数用的是cobra这个框架,server/cli/cli.go这个文件中定义了名为rootCmd的变量,变量的值是cobra.Command,cobra.Command是一个结构体,代表一个命令,其各个属性含义如下: 
+
+```
+Use 是命令的名称.
+Short 代表当前命令的简短描述.
+Long 表示当前命令的完整描述.
+Run属性是一个函数,当执行命令时会调用此函数.
+```
+
+第159行的rootCmd.Execute()是主要的执行入口,其内部会解析os.Args[1:]参数列表,然后遍历命令树,为命令找到合适的匹配项和对应的标志.然后开始执行Run定义的函数,接下来继续分析rootCmd.Execute()函数其它的内容.
+
+```
+assets.GetRootAppDir: 根据当前用户创建一个用来保存sliver缓存信息的目录,这个目录用来存放一些配置、日志信息、数据库等信息,目录的路径是当前用户根目录/.sliver,下面为表达准确,假定当前用户为root,那么创建的这个目录为/root/.sliver
+
+initConsoleLogging: 根据上一步获得的根目录创建专门存放日志信息的目录,路径为/root/.sliver/logs
+
+assets.Setup: 读取存放sliver版本的文件,如果运行sliver时指定强制解压或者重写,当sliver版本不是最新的,会下载最新版本进行解压.
+
+certs.SetupCAs(): 检查/root/.sliver/certs目录下是否存在MtlsImplantCA、MtlsServerCA、OperatorCA、HTTPSCA这四种证书的,如果不存在则会在这个目录下生成这4种证书
+
+certs.SetupWGKeys(): 从数据库中检查是否存在WireGuard的公钥和私钥,如果没有,则新建一对公私钥
+
+cryptography.AgeServerKeyPair(): 从数据库中检查是否存在ECC的公私钥,如果没有,则新建一对公私钥
+
+cryptography.MinisignServerPrivateKey(): 从数据库中检查是否存在Minisign的私钥,如果没有,则新建一个私钥
+
+c2.SetupDefaultC2Profiles(): 从数据库中检查是否存在默认的HTTP C2配置,如果没有,则新建一个HTTP C2配置
+
+configs.GetServerConfig(): 检查是否存在/root/.sliver/configs/server.json这个配置文件,如果存在这个文件,获取默认的配置并写入到这个文件中,最后返回获取到的默认配置.如果不存在就会创建这个文件,并把获取到的默认配置写到这个文件里.
+
+/server/cli/cli.go第137行-第146行就是看数据库中是否存在监听器任务,如果存在则开启这些监听器
+
+然后看下server.json文件里是否配置了后台启动模式,如果开启进入后台模式,启动TsNet、Mtls这2个监听器,如果不开启进入服务端控制台.server.json默认是不进入后台模式的
+```
+
+接下来进入到/server/console/console.go这个文件的Start()函数
+
+```
+这个函数用来初始化一个RPC服务,并进行简单的测试,看下RPC服务是否创建成功.服务端控制台和服务端通信时使用RPC协议进行通信,sliver是用的grpc这个开源框架进行的RPC通信
+
+接下来来到console.NewConsole(false): 新建一个控制台,这时代码的执行流程就跳到client/console/console.go的NewConsole函数里了,估计是为了减少代码重复,复用了客户端创建控制台的代码,感觉这样有点乱,不知道为什么要这样做,分开来会更清晰下.
+```
+
+client/console/console.go, NewConsole:
+
+```
+初始化一个SliverClient对象,对这个对象进行初始化,设置了保存历史命令的文件,文件路径为/root/.sliver/history,设置一些菜单信息.
+
+con.PrintLogo(): 开始打印一些logo信息,包括rpc版本、一些欢迎信息等,读取/root/.sliver/last_update_check获取最后一次检查文件的时间,与现有二进制文件的编译时间进行对比,看两者之间是否超过30天,如果超过则进行提醒更新.
+```
+
+执行完client/console/console.go的NewConsole函数返回到server/console/console.go的第59行,继续往下执行就是client/console/console.go文件的StartClient()函数: 
+
+```
+把服务端和Implant支持的命令注册到控制台,然后开启2个协程,分别用来在后台处理server通过RPC协议传来的各种事件、解析传来的隧道信息并分发它们到会话或者隧道对象.接下来就是一些日志的相关处理.
+```
+
+经过上面的流程后就开启一个控制台了,这时候就可以输入各种命令进行执行了.
+
+接下来以启动监听器和生成代码为切入点进行流程分析.
+
+## 启动监听器与生成木马
+
+通讯协议: 指的是木马和服务端,客户端和服务端进行通信所采用的协议类型.在目标能出网的情况下,Sliver支持MTLS、WireGuard、HTTPS、DNS这4种协议.也就是创建监听器时可以选择创建这4种类型的监听器.
+
+### MTLS
+
+MTLS: 全称是Mutual TLS,中文翻译为双向TLS,即客户端和服务端都互相验证对方的证书.在传统的TLS场景中,只有客户端验证服务端的证书,服务端并不会验证客户端发来的证书.这个技术在APP中也有使用,是为了防止用burpsuite、fiddler等工具抓包,burpsuite、fiddler等工具会用自己生成的证书伪造客户端、服务端对流量进行加解密,从而完成看到HTTPS数据包明文的目的.如果服务端对burpsuite、fiddler等工具的证书进行检测,那么burpsuite、fiddler等工具是抓不到HTTPS数据包的.sliver的mtls也是客户端和服务端都互相验证对方的证书,即Implant和mtls监听器都互相验证对方的证书然后再进行数据的交互.
+
+#### MTLS监听器
+
+通过在服务端控制台输入mtls,就可以按照默认配置启动一个mtls类型的监听器了,在代码中搜索Start an mTLS listener可以定位到相关代码,位于client/command/jobs/commands.go中第41行,这条命令绑定的函数是MTLSListenerCmd.
+
+```
+MTLSListenerCmd函数位于client/command/jobs/mtls.go文件中,此函数没有多少代码,就是根据host、port等参数来创建一个监听器
+```
+
+接下来进入StartMTLSListener,位于server/rpc/rpc-jobs.go文件中第109行,继续跟进,在122行进入StartMTLSListenerJob函数,位于server/c2/jobs.go.然后来到StartMutualTLSListener函数,这个函数是完成主要功能的,位于server/c2/mtls.go文件中.
+
+```
+StartMutualTLSListener函数首先在数据库中查找CA类型为mtls-server、key类型为ecc的PEM格式的证书,如果数据库中不存在,则新创建证书并保存到数据库中.
+
+然后获取TLS配置,获取配置的过程中,会在root/.sliver/certs目录中获取mtls-implant-ca-cert.pem、mtls-implant-ca-key.pem这2个文件的内容,并把这2个证书解析为x509格式的证书.新建一个
+x509证书池,把得到的证书保存到这个池里,是为了后面客户端和服务端相互检验对方证书.
+
+接下来把从数据库中查找到的CA类型为mtls-server、key类型为ecc的PEM格式的证书解析成x509证书.接下来就是根据得到的这些证书和指定的端口进行监听.
+
+最后开一个协程,用acceptSliverConnections来处理接收到的请求.开启mtls的监听器代码流程到这里就结束了.
+```
+
+##### MTLS木马
+
+在服务端控制台输入generate --mtls 172.16.181.182:443 --os windows --arch amd64就可以生成一个用mtls协议通信的windows 64位的木马
+
+搜索Bind("generate"可以发现generate这个命令的相关执行入口为client/command/generate/commands.go的第21行代码,继续跟进GenerateCmd函数,这个函数入口位于client/command/generate/generate.go第91行,对GenerateCmd函数进行分析.接下来来到parseCompileFlags函数,位于同文件的第184行.
+
+parseCompileFlags: 
+
+```
+首先是解析输入的命令参数,完成一些默认配置,因为没有指定外在的编译器,来到同文件第91行compile函数,开始生成木马
+```
+
+compile: 
+
+```
+输入一些信息,来到同文件第925行,跟进con.Rpc.Generate,位于protobuf/rpcpb/services_grpc.pb.go文件
+```
+
+Generate: 
+
+```
+通过c.cc.Invoke(ctx, "/rpcpb.SliverRPC/Generate", in, out, opts...)开始通过RPC接口把生成任务下发给服务端,来生成木马
+
+处理这个RPC接口请求的相关函数为server/rpc/rpc-generate.go的Generate函数
+```
+
+Generate: 
+
+```
+如果输入的命令参数没有指定木马文件名字,则随意创建一个,如果指定了,要对文件名进行检测,要符合一定的规则.如果指定了id,则从数据库中查找相应的配置,没有指定则从输入的参数检查是否指定url.然后来到用第95行的GenerateConfig来为木马生成相关的证书.
+```
+
+GenerateConfig: 
+
+```
+在root/.sliver/certs目录中获取mtls-implant-ca-cert.pem、mtls-implant-ca-key.pem这2个文件的内容,然后mtls-implant这个CA去生成ecc的证书.如果配置中没有设置ecc key则会重新一对ecc的密钥对.
+```
+
+接下来返回到Generate函数,继续往下执行,从数据库中找到http c2木马配置,然后根据生成的木马类型,到同文件111行,用SliverExecutable来生成最终的木马文件.
+
+SliverExecutable函数位于server/generate/binaries.go文件中.
+
+SliverExecutable: 
+
+```
+首先获取sliver的根目录,即root/.sliver,然后设置一些编译选项,用renderSliverGoCode来生成shellcode.
+```
+
+renderSliverGoCode: 检查编译选项是否正确,从父配置中随机生成新的木马配置,这是木马生成时使用的主要配置.生成root/.sliver/slivers目录,再创建一个项目目录,即root/.sliver/slivers/windows/amd64,用来存储编译时产生的临时文件,创建/.sliver/slivers/windows/amd64/mtls_test8/src目录,来存放编译成exe的go源码文件.创建root/.sliver/slivers/windows/amd64/mtls_test8/src/github.com/bishopfox/sliver目录,存放编译exe文件所用到的依赖文件.遍历sliver目录及其所有子目录下的文件,针对每个文件执行一个函数操作.
+
+```
+这个函数主要功能为读取文件内容.如果生成的文件不是windows木马文件、读取的文件名是sliver.c或sliver.h、生成的木马文件也不是sharelib或shellcode时则返回为空.如果文件名为sliver.go、sliver.c、sliver.h时,新建一个路径名,路径名为root/.sliver/slivers/windows/amd64/mtls_test8/src/github.com/bishopfox/sliver/文件名.如果不是上面的这三个中的任何一个,路径名为root/.sliver/slivers/windows/amd64/mtls_test8/src/github.com/bishopfox/sliver/implant/文件原有路径.
+
+然后就是检查新创建的路径名是否存在路径,如果不存在则新建.
+
+检查每个文件是不是.go、.c、.h这三个的其中一个,如果不是则返回错误.
+
+然后初始化一个编码器,新建一个名为sliver的模版,把上面读取到的文件内容渲染到模版里.然后执行创建的模板,并传入一个结构体作为模板的参数.结构体中包含了模板中需要替换的具体值.这样模板中的占位符将被实际的值替换,生成最终的代码,并将结果写入缓冲区中.
+
+首先,检查配置中是否存在CanaryDomains,如果存在,则记录到日志中.创建一个新的模板canaryTemplate,并使用 Delims方法来设置自定义的模板分隔符,这里设置为[[和]].创建一个CanaryGenerator结构体,并初始化其字段,用于生成 Canary相关的内容.向模板中添加自定义函数GenerateCanary,该函数将由canaryGenerator.GenerateCanary方法实现.最后将模板渲染并将结果写入文件fSliver.
+```
+
+上面的函数执行完后,renderSliverGoCode函数开始渲染原生编码的静态资源到root/.sliver/slivers/windows/amd64/mtls_test8/src/github.com/bishopfox/sliver中,如果指定了通讯流量编码,则把流量编码的相关资产也渲染到root/.sliver/slivers/windows/amd64/mtls_test8/src/github.com/bishopfox/sliver目录中,然后把go.mod、go.sum文件也渲染到root/.sliver/slivers/windows/amd64/mtls_test8/src/github.com/bishopfox/sliver目录.
+
+然后把sliver/vendor每个目录下的文件也都渲染到root/.sliver/slivers/windows/amd64/mtls_test8/src/github.com/bishopfox/sliver下面,最后返回root/.sliver/slivers/windows/amd64/mtls_test8/src/github.com/bishopfox/sliver这个目录.
+
+继续回到server/generate/binaries.go的SliverExecutable函数: 
+
+```
+指定生成的木马文件保存目录为root/.sliver/slivers/windows/amd64/mtls_test8/bin/CONTINUED_STUD,如果生成的木马是windows木马,则在后面加上.exe后缀.如果木马是windows木马并没有开启调试时,增加编译选项" -H=windowsgui",这是用来设置当点击生成的exe木马时不弹窗.然后就是调用gogo.GoBuild()函数进行编译exe木马.gogo.GoBuild编译时会判断是否开启了混淆,如果开启则用garble进行编译混淆,如果没有直接用go命令直接进行编译,返回生成木马路径.返回到server/rpc/rpc-generate.go的Generate函数.
+```
+
+server/rpc/rpc-generate.go的Generate函数:
+
+```
+获取生成的木马路径,木马文件内容,并把这个木马文件内容保存到数据库中.返回一个Generate对象,这个对象包含木马路径、木马文件内容.返回到client/command/generate/generate.go文件的925行.
+```
+
+client/command/generate/generate.go
+
+```
+从964行开始就是根据得到木马文件名和木马文件内容,把木马文件保存到当前目录下.
+```
+
+从上述功能来看,compile这个函数主要做的就是把sliver/implant、sliver/protobuf/commonpb、sliver/protobuf/dnspb、sliver/protobuf/sliverpb、sliver/vendor、sliver/go.mod、sliver/go.sum等目录下的文件复制到/root/.sliver/slivers的临时目录中,然后把implant/sliver/sliver.go当成主文件编译成exe程序,然后把生成的exe文件路径修改下为当前目录.至此,生成mtls类型的木马文件分析完成.
+
+### WireGuard
+
+WireGuard: 是一个易于配置、快速且安全的开源VPN程序及协议.WireGuard基于Linux内核实现,用Curve25519进行密钥交换,用ChaCha20加密数据,用Poly1305进行数据认证,用BLAKE2进行散列函数运算,支持IPv4和IPv6的第3层.WireGuard比IPsec和OpenVPN更好的性能.
+
+WireGuard具有的优势如下:
+
+```
+更轻便: 以Linux内核模块的形式运行,资源占用小
+更高效: 相比目前主流的IPSec、OpenVPN等协议,WireGuard的效率要更高
+更快速: 比目前主流的VPN协议,连接速度要更快
+更安全: 使用了更先进的加密技术
+更易搭建: 部署难度相对更低
+更隐蔽: 以UDP协议进行数据传输,比TCP协议更低调
+不易被封锁: TCP阻断对WireGuard无效,IP被墙的情况下仍然可用
+更省电: 不使用时不进行数据传输,移动端更省电
+```
+
+#### WireGuard监听器
+
+通过在服务端控制台输入wg,就可以按照默认配置启动一个WireGuard类型的监听器了,在代码中搜索Start a WireGuard listener可以定位到相关代码,位于client/command/jobs/commands.go中第57行,这条命令绑定的函数是WGListenerCmd.
+
+WGListenerCmd函数位于client/command/jobs/wg.go文件中,此函数没有多少代码,就是根据host、port等参数来创建一个监听器
+
+接下来进入StartWGListener,位于server/rpc/rpc-jobs.go文件中第141行,继续跟进,在173行进入StartWGListenerJob函数,位于server/c2/jobs.go.然后来到StartWGListener函数,这个函数是完成主要功能的,位于server/c2/wireguard.go文件中.
+
+server/c2/wireguard.go
+
+StartWGListener: 
+
+```
+首先通过CreateNetTUN创建一个隧道,然后在数据库中查找WireGuard所用到的公私钥,如果数据库中不存在,则新创建证书并保存到数据库中.然后新建一个WireGuard设备,获取隧道两端的公钥,实现WireGuard配置协议,启动创建的设备.第108行-114行监听密钥交换端口用来处理这个端口收到的连接.第117行监听虚拟隧道接口端口用来处理这个端口收到的连接.最后开一个协程,用acceptWGSliverConnections来处理接收到的请求.开启WireGuard的监听器代码流程到这里就结束了.
+```
+
+#### WireGuard木马
+
+在服务端控制台输入generate --wg 172.16.181.182:443 --os windows --arch amd64就可以生成一个用WireGuard协议通信的windows 64位的木马.
+
+生成一个用WireGuard协议通信的木马所用到的流程是和生成用MTLS协议通信的木马用到的流程基本上都是一样的,同样的入口,就是根据协议不同,渲染代码时用到的配置不同.相同的流程就不再赘述,只写出存在不同的地方.
+
+SliverExecutable函数位于server/generate/binaries.go文件中
+
+SliverExecutable: 
+
+```
+这个函数最后返回build这个对象之前会根据通信协议是MTLS还是WireGuard,来获取不同的密钥、证书等信息.
+```
+
+其他的流程就和生成MTLS协议的木马流程是一样的了
+
+### DNS
+
+DNS: 说起DNS就熟悉多了,DNS是一个将域名和IP地址相互映射的分布式数据库,能够使人更方便地访问互联网.Cobaltstike工具也可以使用DNS协议来传输数据.
+
+用DNS协议来传输数据的原理是当木马向服务器发送数据时,会在子域名中填充编码后的数据,然后发送给目标DNS服务器,然后服务器通过查询DNS的记录,从子域名中提取出来编码后的数据,通过还原编码的数据得到明文信息.服务器向木马发送数据时会使用TXT查询,把要发送的数据写到TXT记录中,然后木马去查询TXT记录来接收数据.
+
+#### DNS监听器
+
+通过在服务端控制台输入dns -d test.com,就可以按照默认配置启动一个dns类型的监听器了,在代码中搜索Start a DNS listener可以定位到相关代码,位于client/command/jobs/commands.go中第78行,这条命令绑定的函数是DNSListenerCmd.
+
+DNSListenerCmd函数位于client/command/jobs/dns.go文件中,此函数没有多少代码,就是根据host、port等参数来创建一个监听器
+
+client/command/jobs/dns.go
+
+接下来进入第46行的StartDNSListener,通过RPC发送指令给服务端,来调用具体的函数开启DNS监听器,这个具体函数位于server/rpc/rpc-jobs.go的192行,在198行进入StartDNSListenerJob函数,位于server/c2/jobs.go.然后来到StartDNSListener函数,这个函数是完成主要功能的,位于server/c2/dns.go文件中.
+
+server/c2/dns.go
+
+StartDNSListener: 
+
+```
+DNS相比MTLS和WireGuard要简单些,不需要生成密钥、证书这些信息,初始化配置后,在第93行给dns注册一个处理函数即可,处理函数是HandleDNSRequest,也是位于server/c2/dns.go文件中.
+```
+
+HandleDNSRequest: 
+
+```
+这个函数也比较简单,先判断域名解析记录是不是指定域名的子域名,如果是的话,直接调用handleC2来处理就行.处理的具体流程就是上面所说的,子域名中提取出来编码后的数据,通过还原编码的数据得到明文信息.
+```
+
+这样,一个DNS类型的监听器就处理完了.
+
+#### DNS木马
+
+在服务端控制台输入generate --dns 172.16.181.182:443 --os windows --arch amd64就可以生成一个用WireGuard协议通信的windows 64位的木马.
+
+生成一个用DNS协议通信的木马所用到的流程是和生成用MTLS协议通信的木马用到的流程基本上都是一样的,同样的入口,根据协议不同,渲染代码时用到的配置不同,并且不用再加载证书这些信息,简单了许多.相同的流程就不再赘述.
+
+### HTTP
+
+HTTP: 超文本传输协议,也是最常见的协议. 
+
+#### HTTP监听器
+
+通过在服务端控制台输入http,就可以按照默认配置启动一个http类型的监听器了,在代码中搜索Start a HTTP listener可以定位到相关代码,位于client/command/jobs/commands.go中第97行,这条命令绑定的函数是HTTPListenerCmd.
+
+HTTPListenerCmd函数位于client/command/jobs/http.go文件中,此函数没有多少代码,就是根据host、port等参数来创建一个监听器
+
+client/command/jobs/http.go
+
+接下来进入第52行的StartHTTPListener,通过RPC发送指令给服务端,来调用具体的函数开启HTTP监听器,这个具体函数位于server/rpc/rpc-jobs.go的249行,在262行进入StartHTTPListenerJob函数,位于server/c2/jobs.go.然后来到StartHTTPListener函数,这个函数是完成主要功能的,位于server/c2/http.go文件中.
+
+server/c2/http.go
+
+StartHTTPListener: 
+
+```
+从这个函数的注释可以看到,开启HTTPS类型的监听器,最终也会来到这个函数,这个函数会根据配置参数来选择启动HTTP类型的监听器还是HTTPS类型的监听器.这个函数在第175行判断是否指定了通过ACME来获取HTTP所用的证书,如果指定了ACME,则通过ACME方式获取证书.如果没有使用ACME来获取证书,则在第198行通过getHTTPSConfig来生成HTTPS监听器所需的证书.
+```
+
+然后返回到server/c2/jobs.go文件中的StartHTTPListenerJob函数第205行,开启一个协程,根据配置,来监听不同的服务.如果是HTPPS类型则判断是不是指定了ACME,如果指定了ACEM,通过listenAndServeTLS用ACEM的证书监听一个HTTPS的端口,如果没有则通过listenAndServeTLS用自己生成的证书来监听一个HTTPS的端口.如果是HTTP类型,通过ListenAndServe函数监听一个HTTP端口.
+
+这样就开启一个HTTP类型的监听器了.
+
+#### HTTP木马
+
+在服务端控制台输入generate --http 172.16.181.182 --os windows --arch amd64就可以生成一个用http协议通信的windows 64位的木马.
+
+生成一个用http协议通信的木马所用到的流程是和生成用MTLS协议通信的木马用到的流程基本上都是一样的,同样的入口,根据协议不同,渲染代码时用到的配置不同,并且不用再加载证书这些信息,简单了许多.相同的流程就不再赘述.
+
+### HTTPS
+
+HTTPS: 在HTTP的基础上通过传输加密和身份认证保证了传输过程的安全性,HTTPS在HTTP的基础上加入SSL/TLS.
+
+#### HTTPS监听器
+
+过在服务端控制台输入https,就可以按照默认配置启动一个https类型的监听器了,在代码中搜索Start a HTTPS listener可以定位到相关代码,位于client/command/jobs/commands.go中第118行,这条命令绑定的函数是HTTPSListenerCmd.
+
+HTTPSListenerCmd函数位于client/command/jobs/https.go文件中,此函数没有多少代码,就是根据host、port等参数来创建一个监听器,比HTTP类型多了一个获取证书内容的操作,通过getLocalCertificatePair函数来获取证书内容.
+
+接下来进入第64行的StartHTTPListener,通过RPC发送指令给服务端,来调用具体的函数开启HTTPS监听器,这个具体函数位于server/rpc/rpc-jobs.go的217行,在230行进入StartHTTPListenerJob函数,位于server/c2/jobs.go.后面的流程就和HTTP的流程一样了,就不再重复写了.
+
+这样就开启一个HTTPS类型的监听器了.
+
+#### HTTPS木马
+
+在服务端控制台输入generate --http 172.16.181.182:443 --os windows --arch amd64就可以生成一个用https协议通信的windows 64位的木马.这个命令和生成HTTP类型木马一样,就是后面通讯地址不一样,一个是HTTP端口,一个是HTTPS端口.
+
+生成一个用https协议通信的木马所用到的流程和生成用MTLS协议通信的木马用到的流程基本上都是一样的,同样的入口,根据协议不同,渲染代码时用到的配置不同,生成的密钥、证书等信息要少一点.相同的流程就不再赘述.
+
+## 总结
+
+> 万事开头难,最近这段时间下班后和周末的空余时间,用来研究Sliver框架,Sliver启动4种监听器和生成4种木马在流程上是没有太大区别的,分析完一种,其他的的就简单了.后续还会继续研究Sliver框架其他方面.
+
+> 他山之石,可以攻玉.
